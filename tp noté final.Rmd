@@ -1,0 +1,940 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# **Projet Sciences des données**
+
+## Terry TRUONG et Kouceila FEZZOUA
+
+------------------------------------------------------------------------
+
+```{r}
+pacman::p_load(ggplot2)
+pacman::p_load(dplyr)
+pacman::p_load(tidyverse)
+pacman::p_load(readr)
+pacman::p_load(BioStatR)
+pacman::p_load(FactoMineR)
+pacman::p_load(factoextra)
+pacman::p_load(ggdendro)
+pacman::p_load(png)
+pacman::p_load(grid)
+pacman::p_load(broom)
+pacman::p_load(knitr)
+pacman::p_load(e1071)
+pacman::p_load(corrr)
+```
+
+# INTRODUCTION
+
+L’analyse statistique occupe aujourd’hui une place centrale dans le football moderne. Les clubs professionnels utilisent de plus en plus les données pour évaluer les performances individuelles des joueurs, identifier des profils spécifiques et optimiser leurs décisions sportives sur le marché des transferts ou dans la préparation tactique.
+
+Dans ce projet, nous nous intéressons à l’analyse des performances de joueurs évoluant dans les principaux championnats européens à partir d’un jeu de données contenant différentes statistiques individuelles. Ces variables décrivent notamment la production offensive des joueurs à travers des indicateurs tels que les buts marqués (Gls), les passes décisives (Ast), les expected goals (xG), les expected assists (xAG) ou encore les actions progressives (PrgC, PrgP, PrgR).
+
+L’objectif principal de cette étude est d’identifier les facteurs expliquant la performance offensive des joueurs et de mettre en évidence différents profils statistiques à travers plusieurs méthodes d’analyse de données.
+
+| Variable | Type | Signification |
+|----------------------|--------------------------|------------------------|
+| Player | Qualitative nominale | Nom du joueur |
+| Squad | Qualitative nominale | Club du joueur |
+| Comp | Qualitative nominale | Championnat du joueur |
+| Nation | Qualitative nominale | Nationalité du joueur |
+| Age | Quantitative discrète | Age du joueur |
+| Pos | Qualitative nominale | Postes du joueur |
+| Min | Quantitative continue | Nombre total de minutes jouées |
+| X90s | Quantitative continue | Nombre de matchs complets équivalents joués |
+| Gls | Quantitative discrète | Nombre de buts marqués |
+| Ast | Quantitative discrète | Nombre de passes décisives |
+| xG | Quantitative continue | Expected Goals : qualité des occasions obtenues |
+| npxG | Quantitative continue | Expected Goals hors penalties |
+| xAG | Quantitative continue | Expected Assists : qualité des occasions créées |
+| npxG.xAG | Quantitative continue | Contribution offensive globale attendue |
+| PrgC | Quantitative discrète | Courses progressives avec ballon |
+| PrgP | Quantitative discrète | Passes progressives |
+| PrgR | Quantitative discrète | Réceptions progressives |
+| Sh | Quantitative discrète | Nombre total de tirs |
+| SoT | Quantitative discrète | Nombre de tirs cadrés |
+
+```{r}
+df <- read.csv("players_data_light-2024_2025.csv")
+```
+
+```{r}
+df_cleaned <- df%>%
+  select(Player,
+    Squad,
+    Comp,
+    Nation,
+    Age,
+    Pos,
+    Min,
+    X90s,
+    Gls,
+    Ast,
+    G.A,
+    G.PK,
+    PK,
+    PKatt,
+    xG,
+    npxG,
+    xAG,
+    npxG.xAG,
+    PrgC,
+    PrgP,
+    PrgR,
+    Sh,
+    SoT,
+    SoT.,
+    CrdY,
+    CrdR)
+head(df_cleaned) %>%
+kable()
+```
+
+# Analyse Univariée d'une variable quantitative
+
+Dans cette première étape, nous étudions la variable quantitative continue npxG.xAG, qui représente la contribution offensive attendue totale d’un joueur. Cette variable combine le npxG (Non-Penalty Expected Goals), qui mesure le nombre de buts attendus hors penalties, et le xAG (Expected Assists), qui estime le nombre de passes décisives attendues.
+
+Ainsi, npxG.xAG permet d’évaluer simultanément la capacité d’un joueur à se créer des occasions de but, à marquer et à créer des opportunités pour ses coéquipiers. D’un point de vue footballistique, cette variable constitue donc un indicateur global particulièrement pertinent pour mesurer l’impact offensif des joueurs.
+
+### Préparation des données
+```{r}
+players_clean <- df_cleaned %>%
+  # supprime tous les gardiens (GK = Goalkeeper) car notre étude porte sur les joueurs de champ
+  filter(Pos != "GK") %>%
+  drop_na(`npxG.xAG`)
+# supprime les observations ayant une valeur manquante pour la variable npxG.xAG
+```
+Ce traitement permet de construire un échantillon cohérent avec l’objectif de l’étude. Les gardiens ont été exclus car leur contribution offensive est très limitée et peu pertinente dans notre analyse. De plus, les valeurs manquantes de npxG.xAG ont été supprimées afin de garantir la fiabilité des analyses statistiques réalisées par la suite.
+
+### Analyse statistique
+
+```{r}
+resume_xG <- players_clean %>%
+  summarise(
+    Effectif = n(),
+    Moyenne = mean(npxG.xAG),
+    Mediane = median(npxG.xAG),
+    Ecart_type = sd(npxG.xAG),
+    Minimum = min(npxG.xAG),
+    Q1 = quantile(npxG.xAG, 0.25),
+    Q3 = quantile(npxG.xAG, 0.75),
+    Maximum = max(npxG.xAG)
+  )
+```
+
+```{r}
+kable(resume_xG, digits = 3, caption = "Indicateurs descriptifs de xG par 90 minutes") 
+```
+
+Minimum = 0
+Certains joueurs n’apportent pratiquement aucune contribution offensive attendue. Cela concerne généralement les défenseurs centraux et les milieux défensifs 
+
+Maximum = 32.4
+Certains joueurs produisent énormément offensivement.
+Cela correspond généralement aux meilleurs attaquants européens comme 
+Erling Haaland Kylian Mbappé Harry Kane
+
+Moyenne > Médiane 2.99 > 1.7
+Cela indique une asymétrie positive 
+quelques joueurs très performants tirent la moyenne vers le haut.
+
+Un écart-type proche de la moyenne montre une forte dispersion car tous les joueurs n’ont pas le même rôle offensif
+
+
+### Histogramme
+
+```{r}
+ggplot(players_clean, aes(x=`npxG.xAG`)) +
+  geom_histogram(fill="darkgreen", color="white", bins=30) +
+  labs(
+    title="Distribution de la contribution offensive attendue",
+    x="npxG.xAG",
+    y="Fréquence"
+  )
+```
+
+L’histogramme de la variable npxG.xAG met en évidence une distribution fortement asymétrique à droite. La majorité des joueurs présentent des valeurs faibles, principalement comprises entre 0 et 5, tandis que la fréquence diminue progressivement lorsque la contribution offensive augmente. La présence d’une longue queue à droite traduit l’existence de quelques valeurs très élevées.
+
+D’un point de vue footballistique, cette distribution est cohérente puisque la majorité des joueurs évoluent dans des rôles peu orientés vers la production offensive, comme les défenseurs ou certains milieux défensifs. À l’inverse, une minorité de joueurs offensifs d’élite concentre une grande partie de la création et de la finition des actions, ce qui explique les valeurs extrêmes observées dans la distribution.
+
+### Boxplot
+
+```{r}
+ggplot(players_clean, aes(y=`npxG.xAG`)) +
+  geom_boxplot(fill="orange") +
+  labs(
+    title="Boxplot de npxG.xAG"
+  )
+```
+
+Le boxplot confirme la forte asymétrie à droite observée dans l’histogramme. La médiane de npxG.xAG reste relativement faible et la majorité des joueurs présente des niveaux de contribution offensive assez proches et globalement faibles. En revanche, la présence de nombreux points atypiques au-dessus de la moustache supérieure met en évidence plusieurs valeurs extrêmes.
+
+D’un point de vue footballistique, ces valeurs extrêmes correspondent à une minorité de joueurs offensifs très performants qui concentrent une grande partie de la production offensive, alors que la majorité des joueurs évoluent dans des rôles moins orientés vers la création ou la finition.
+
+### Mesure de l’asymétrie de la distribution
+
+```{r}
+
+skewness(players_clean$`npxG.xAG`)%>%
+  kable(caption = "Mesure de l’asymétrie de la distribution")
+```
+
+
+Le coefficient d’asymétrie Skewness = 2.38 est synonyme d’une forte asymétrie positive. Cela signifie que beaucoup de joueurs ont de faibles valeurs de npxG.xAG, tandis qu’un nombre réduit de joueurs possède des valeurs très élevées. Cette observation confirme les résultats obtenus à partir de l’histogramme et du boxplot.
+
+
+
+### Mesure de l’aplatissement de la distribution
+
+```{r}
+kurtosis(players_clean$`npxG.xAG`)%>%
+  kable(caption = "Mesure de l’aplatissement de la distribution")
+```
+
+Le coefficient d’aplatissement de 7.82 met en évidence la présence de valeurs extrêmes importantes. Certains joueurs se distinguent fortement du reste de l’échantillon par leur contribution offensive très élevée. Cela confirme l’existence de profils offensifs d’élite particulièrement performants.
+
+
+
+
+### Conclusion
+
+L’analyse univariée met en évidence une répartition très inégale de la contribution offensive attendue des joueurs européens. La majorité des joueurs présente de faibles valeurs de npxG.xAG, tandis qu’un nombre restreint de joueurs affiche des performances offensives nettement supérieures, ce qui explique la forte asymétrie de la distribution ainsi que la présence de nombreuses valeurs extrêmes.
+
+D’un point de vue footballistique, cette concentration reflète le fait que la production offensive repose principalement sur un nombre limité de joueurs clés, généralement des attaquants ou des milieux offensifs créatifs. Cette première analyse constitue une base importante pour la suite du projet, notamment pour étudier l’impact du poste sur la performance offensive, analyser la relation entre les buts et les statistiques avancées, puis identifier différents profils de joueurs à travers l’ACP et les méthodes de classification.
+
+
+# Analyse Univariée d'une variable qualitative :
+
+```{r}
+players_clean2 <- df_cleaned %>%
+  drop_na(`Pos`)
+```
+
+
+```{r}
+players_clean2 %>%
+  count(Pos) %>%
+  mutate(
+    Pourcentage = round(n / sum(n) * 100, 2)
+  ) %>%
+  kable(caption = "Nombre et pourcentage de joueurs par poste")
+```
+
+Ce tableau montre que les défenseurs représentent la catégorie la plus importante de l’échantillon avec 30,10% des joueurs, suivis des milieux avec 20,64%. Les attaquants purs représentent quant à eux 13% de l’échantillon. On observe également une part non négligeable de joueurs polyvalents occupant plusieurs postes comme FW,MF ou MF,FW.
+
+La présence de 7,43% de gardiens justifie leur exclusion dans la suite de l’étude, puisque notre analyse porte principalement sur la performance offensive des joueurs de champ. Globalement, cette répartition montre que le dataset est relativement diversifié et couvre différents profils de joueurs.
+
+### 4. Diagramme en barres
+
+```{r}
+ggplot(players_clean2, aes(x=Pos))+
+  geom_bar(fill="steelblue")+
+  theme(axis.text.x = element_text(angle=45,hjust=1))
+```
+
+Ce diagramme en barres confirme la répartition observée dans le tableau précédent. Les défenseurs constituent la catégorie la plus représentée dans l’échantillon, suivis des milieux puis des attaquants. On observe également la présence de plusieurs profils hybrides comme FW,MF ou MF,FW, ce qui reflète la polyvalence croissante des joueurs dans le football moderne.
+
+La présence des gardiens reste relativement limitée mais non négligeable. Globalement, cette répartition montre que notre jeu de données couvre une grande diversité de profils, tout en étant davantage composé de joueurs ayant des rôles défensifs ou intermédiaires que de purs attaquants.
+
+
+
+### 6.Mode
+
+La modalité la plus fréquente :
+
+```{r}
+sort(table(players_clean2$Pos), decreasing = TRUE) %>%
+  kable(caption = "Postes les plus représentés")
+```
+
+La mode de la variable Pos est DF avec 859 joueurs, ce qui en fait la catégorie la plus représentée dans l’échantillon. Cette observation est cohérente avec la réalité du football professionnel, puisque les effectifs des clubs comportent généralement davantage de défenseurs que d’attaquants. Dans un schéma tactique classique, on retrouve souvent environ quatre défenseurs contre seulement un à trois attaquants, ce qui explique logiquement cette surreprésentation dans le dataset.
+
+### 7. Analyse des catégories rares
+
+La variable Pos contient plusieurs catégories hybrides comme DF,FW, MF,DF ou FW,DF, qui représentent un nombre très faible d’observations. Ces catégories rares peuvent rendre certaines analyses plus difficiles à interpréter, notamment les analyses bivariées et les méthodes de classification.
+
+Nous allons alors classifier les joueurs selon leur role principal : par exemple DF, FW devient DF
+```{r}
+players_clean2$Pos_simple <- case_when(
+  grepl("FW", players_clean2$Pos) ~ "Attaquant",
+  grepl("MF", players_clean2$Pos) ~ "Milieu",
+  grepl("DF", players_clean2$Pos) ~ "Défenseur",
+  grepl("GK", players_clean2$Pos) ~ "Gardien"
+)
+```
+
+```{r}
+ggplot(players_clean2, aes(x=Pos_simple))+
+  geom_bar(fill="steelblue")+
+  theme(axis.text.x = element_text(angle=45,hjust=1))
+```
+
+Ce graphique montre une répartition beaucoup plus lisible des joueurs selon leur poste principal. Cette simplification permet de réduire la dispersion liée aux postes hybrides et facilite les analyses futures, notamment l’étude de la relation entre le poste et la contribution offensive.
+
+### Conclusion
+
+L’analyse de la variable Pos montre que les défenseurs et les milieux sont les catégories les plus représentées dans l’échantillon, tandis que les gardiens restent minoritaires. La présence de nombreux profils hybrides met également en évidence la polyvalence croissante des joueurs dans le football moderne, où certains évoluent sur plusieurs postes selon les besoins tactiques de leur équipe.
+
+Afin de simplifier les analyses futures, ces postes hybrides ont été regroupés en catégories plus larges. Cette nouvelle variable sera particulièrement utile dans la suite du projet pour étudier l’impact du poste sur la contribution offensive des joueurs et comparer plus facilement leurs performances statistiques.
+
+# Analyse bivariée de variables quantitatives
+
+Dans cette partie, nous cherchons à analyser la relation entre deux variables quantitatives : xG (Expected Goals) et Gls (buts marqués). La variable xG mesure la qualité des occasions obtenues par un joueur en estimant la probabilité qu’un tir se transforme en but, tandis que Gls représente le nombre réel de buts inscrits.
+
+L’objectif est de déterminer si les joueurs qui se procurent davantage d’occasions de qualité marquent effectivement plus de buts. D’un point de vue footballistique, cette relation est particulièrement pertinente puisqu’elle permet d’évaluer l’efficacité offensive des joueurs et de vérifier si les performances réelles sont cohérentes avec les occasions générées.
+
+### **1. Vérification des valeurs manquantes**
+
+Avant toute analyse :
+
+```{r}
+colSums(is.na(players_clean[,c("xG","Gls")])) #Verifier s'il y a des valeurs manquantes ou pas
+```
+
+
+xG = 0 Gls = 0 donc aucune donnée manquante
+
+### **2. Statistiques descriptives**
+
+```{r}
+football_clean <- players_clean %>%
+  select(xG, Gls)
+
+football_clean %>%
+  summarise(
+    mean_xG = mean(xG),
+    median_xG = median(xG),
+    sd_xG = sd(xG),
+    min_xG = min(xG),
+    max_xG = max(xG),
+    
+    mean_Gls = mean(Gls),
+    median_Gls = median(Gls),
+    sd_Gls = sd(Gls),
+    min_Gls = min(Gls),
+    max_Gls = max(Gls)
+  ) %>%
+  kable(caption = "Statistiques descriptives de xG et Gls")
+```
+
+Les statistiques descriptives montrent que les moyennes de xG et Gls restent relativement faibles, ce qui s’explique par la présence de nombreux joueurs peu impliqués offensivement. Les valeurs maximales sont cependant élevées, traduisant la présence de joueurs offensifs très performants. L’écart-type relativement important indique également une forte hétérogénéité des performances offensives entre les joueurs.
+
+
+
+### **3. Corrélation linéaire**
+
+```{r}
+cor(players_clean$xG, players_clean$Gls)
+```
+
+Le coefficient de corrélation de Pearson entre xG et Gls est égal à 0.935, ce qui indique une très forte corrélation linéaire positive entre les deux variables. Ainsi, lorsque les expected goals augmentent, le nombre de buts marqués tend également à augmenter.
+
+D’un point de vue footballistique, ce résultat est cohérent puisque les joueurs qui se procurent davantage d’occasions de qualité ont généralement plus de chances de marquer. Cette forte corrélation confirme que xG constitue un excellent indicateur pour expliquer la performance de finition des joueurs et justifie l’utilisation d’un modèle de régression linéaire dans la suite de l’analyse.
+
+### **4. Régression linéaire simple**
+
+
+```{r}
+modele <- lm(Gls ~ xG, data=players_clean) 
+summary(modele)
+```
+
+Le modèle de régression linéaire met en évidence une relation très significative entre xG et le nombre de buts marqués (p-value < 2.2e-16). Le coefficient associé à xG est égal à 1.05, ce qui signifie qu’une augmentation d’une unité de xG entraîne en moyenne une augmentation d’environ 1 but marqué.
+
+Le coefficient de détermination R2 = 0.874 indique que près de 87,4 % de la variation du nombre de buts marqués est expliquée par la variable xG, ce qui traduit un très bon pouvoir explicatif du modèle. D’un point de vue footballistique, cela confirme que la qualité et le volume des occasions obtenues constituent un facteur majeur de performance offensive, même si certains joueurs restent plus efficaces que d’autres dans la finition.
+
+### **5. Nuage de points avec droite de régression**
+
+
+```{r}
+ggplot(players_clean, aes(x=xG, y=Gls)) +
+  geom_point(
+    color="dark blue",
+    alpha=0.6
+  ) +
+  geom_smooth(
+    method="lm",
+    color="red",
+    fill="orange",
+    se=TRUE
+  ) +
+  theme_minimal()
+```
+
+Ce nuage de points accompagné de la droite de régression met clairement en évidence une relation linéaire positive entre xG et le nombre de buts marqués. Plus les expected goals d’un joueur augmentent, plus le nombre de buts inscrits tend également à augmenter, ce qui confirme visuellement les résultats obtenus avec le coefficient de corrélation et le modèle de régression.
+
+On observe néanmoins quelques écarts autour de la droite de régression, ce qui traduit des différences d’efficacité entre les joueurs. 
+
+D’un point de vue footballistique, certains joueurs convertissent mieux leurs occasions que prévu alors que d’autres sous-performent malgré un volume élevé d’occasions créées. Les points situés en haut à droite correspondent généralement aux attaquants les plus performants offensivement.
+
+### **6. Calcul des résidus**
+
+```{r}
+players_clean$residus <- residuals(modele)
+# calcule les résidus 
+players_clean$fitted <- fitted(modele)
+# calcule les buts predits par la regression
+```
+
+
+
+### **7. Résidus vs fitted**
+
+```{r}
+ggplot(players_clean, aes(x=fitted,y=residus))+
+  geom_point(color="blue")+
+  geom_hline(yintercept=0,
+             color="red",
+             linetype="dashed")+
+  theme_minimal()
+```
+
+Le graphique des résidus en fonction des valeurs ajustées montre que les résidus sont globalement répartis autour de la ligne horizontale située en 0, ce qui suggère que le modèle linéaire est globalement adapté pour expliquer la relation entre xG et les buts marqués.
+
+On observe toutefois une légère dispersion plus importante pour certaines valeurs élevées de xG, ce qui peut traduire des différences d’efficacité entre les joueurs. D’un point de vue footballistique, certains joueurs marquent davantage que ce que prédit leur xG, tandis que d’autres convertissent moins bien leurs occasions. Malgré ces écarts, le modèle reste globalement performant.
+
+### **9. Histogramme des résidus**
+
+```{r}
+ggplot(players_clean,aes(x=residus))+
+  geom_histogram(  #distribution des residus
+    aes(y=after_stat(density)), #permet de superposer correctement la densite
+    bins=25,
+    fill="grey"
+  )+
+   
+  theme_minimal()
+```
+
+L’histogramme des résidus montre que ceux-ci sont majoritairement concentrés autour de 0, ce qui indique que les prédictions du modèle sont globalement proches des valeurs observées. La distribution semble relativement symétrique, bien que quelques valeurs extrêmes apparaissent dans les deux extrémités.
+
+Cela signifie que le modèle explique correctement le nombre de buts pour la majorité des joueurs. D’un point de vue footballistique, les observations extrêmes correspondent à certains joueurs qui marquent davantage ou moins que ce que leur xG laissait prévoir, traduisant des différences individuelles dans l’efficacité devant le but.
+
+### **10. QQ plot**
+
+```{r}
+ggplot(players_clean,aes(sample=residus))+
+  stat_qq()+
+  stat_qq_line(color="red")+
+  theme_minimal()
+```
+
+Le QQ-plot permet de vérifier si les résidus suivent approximativement une loi normale. On observe que les points suivent relativement bien la droite au centre de la distribution, ce qui indique une normalité acceptable pour la majorité des observations. En revanche, les écarts plus importants dans les extrémités montrent la présence de valeurs extrêmes.
+
+### **11. Joueurs atypiques**
+
+```{r}
+players_clean %>%
+  arrange(desc(abs(residus))) %>%
+  ## classe les joueurs selon la valeur absolue de leurs residus
+  select(Player, Gls, xG, residus) %>%
+  # On conserve uniquement les variables qui nous interessent
+  head(10) %>%
+  kable(
+    caption = "Top 10 des joueurs ayant les résidus les plus élevés en valeur absolue"
+  )
+```
+
+Ce tableau met en évidence les joueurs les plus atypiques du modèle, c’est-à-dire ceux pour lesquels l’écart entre les buts réellement marqués et les buts prédits par leur xG est le plus important. Un résidu positif indique qu’un joueur a marqué davantage que prévu, tandis qu’un résidu négatif signifie qu’il a moins marqué que ce qu’annonçait son xG.
+
+D’un point de vue footballistique, ces joueurs peuvent être interprétés comme des finisseurs particulièrement efficaces ou, au contraire, comme des joueurs moins performants dans la conversion de leurs occasions. Cette analyse permet ainsi d’identifier les profils offensifs les plus atypiques du dataset.
+
+
+# Analyse bivariée qualitative
+
+"La répartition des types de postes (défenseurs, milieux, attaquants) est-elle la même d'un championnat à l'autre ?" Nous allons analysé la variable pos avec la variable comp. 
+Certains championnats sont réputés plus défensifs ou plus portés vers l'attaque. Croiser Pos et Comp permet de voir si, par exemple, la proportion de "DF" est plus élevée en Serie A qu'en Bundesliga.
+
+```{r}
+# Conversion en facteur pour l'analyse qualitative
+players_clean$Pos <- as.factor(players_clean$Pos)
+players_clean$Comp <- as.factor(players_clean$Comp)
+```
+Le type factor (facteur) indique à R que cette variable est catégorielle. Cela signifie qu'elle possède un nombre fini de catégories (les "niveaux" ou levels).
+```{r}
+# Création du tableau de contingence
+tab_biv <- table(players_clean$Pos, players_clean$Comp)
+tab_biv%>%
+  kable(caption = "Tableau de contingence entre poste et championnat") #forme 'jolie' du tableau
+
+```
+
+Ce tableau donne les effectifs conjoints. Chaque cellule indique, par exemple, le nombre de "Défenseurs" (DF) évoluant en "Ligue 1".
+Cependant, comme les championnats n'ont pas forcément le même nombre de joueurs, il est indispensable de comparer des proportions plutôt que des nombres bruts.
+
+```{r}
+# Profils-colonnes : Répartition des postes AU SEIN de chaque compétition
+# margin = 2 indique qu'on calcule les % par colonne (Comp)
+prop_comp <- prop.table(tab_biv, margin = 2) * 100 #margin = 2 indique à R de calculer les pourcentages par rapport au total de chaque colonne
+round(prop_comp, 2) #Arrondit le résultat à deux chiffres après la virgule.
+```
+Le simple comptage des effectifs ne suffit pas à comparer les championnats, car chaque ligue possède un nombre différent de joueurs enregistrés. Nous avons donc calculé les profils-colonnes (pourcentages par compétition).
+
+```{r}
+ggplot(players_clean) +
+  aes(x = Comp, fill = Pos) +
+  geom_bar(position = "fill") + # "fill" crée des barres de hauteur identique (100%)
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Structure des Postes par Compétition",
+    x = "Championnat (Comp)",
+    y = "Proportion des postes",
+    fill = "Poste (Pos)"
+  ) +
+  theme_minimal()
+```
+Si les segments de couleurs ont des tailles différentes d'une colonne à l'autre, cela signifie que le choix du poste dépend du championnat (il y a une liaison entre les deux variables).Une plus forte concentration d'un poste dans un championnat par rapport aux autres postes ne nous dit rien sur le nombre total de joueurs : la proportion d'attaquants peut être plus élevée en PL qu'en Bundesliga mais cela ne veut pas dire qu'il y a plus d'attaquants en PL (même si c'est le cas). L'objectif est de comparer des structures ou des comportements : Est-ce que la Premier League est "plus offensive" dans sa composition que la Bundesliga ? Y a-t-il une dépendance entre le championnat et le profil des joueurs ?
+
+```{r}
+test_chi2_precise <- chisq.test(tab_biv, simulate.p.value = TRUE)
+print(test_chi2_precise)
+```
+Pour conclure si la différence observée est statistiquement significative ou due au hasard, on utilise le test d'indépendance.
+Comme p-value < 0.05, on rejette l'hypothèse d'indépendance. La répartition des postes est significativement différente d'un championnat à l'autre.
+
+
+
+# Analyse d’un lien entre une variable qualitative et une variable quantitative
+
+**Les postes influencent-ils significativement la contribution offensive attendue des joueurs mesurée par npxG.xAG ?**
+
+Dans cette partie, nous analysons la relation entre une variable qualitative (Pos_simple) et une variable quantitative (npxG.xAG). L’objectif est d’étudier si la contribution offensive attendue varie selon le poste occupé par les joueurs.
+
+### **1. Préparation des données**
+```{r}
+
+players_clean <- players_clean %>%
+  mutate(
+    Pos_simple = case_when(
+      str_detect(Pos, "FW") ~ "Forward",
+      str_detect(Pos, "MF") ~ "Midfielder",
+      str_detect(Pos, "DF") ~ "Defender",
+      TRUE ~ Pos
+    )
+  )
+```
+
+Afin de simplifier l’interprétation, nous regroupons les joueurs selon leur rôle principal en trois grandes catégories : attaquants (Forward), milieux (Midfielder) et défenseurs (Defender). Cette nouvelle variable Pos_simple permettra d’obtenir des visualisations plus claires et plus pertinentes sur le plan footballistique.
+
+### **2) Tableau descriptif par poste**
+
+```{r}
+players_clean %>%
+  group_by(Pos_simple) %>%
+  summarise(
+    moyenne = mean(npxG.xAG),
+    mediane = median(npxG.xAG),
+    ecart_type = sd(npxG.xAG),
+    minimum = min(npxG.xAG),
+    maximum = max(npxG.xAG)
+  ) %>%
+  kable(
+    caption = "Statistiques descriptives de npxG.xAG selon le poste"
+  )
+```
+
+Ce tableau met en évidence des différences nettes de contribution offensive selon le poste occupé. Les attaquants (Forward) présentent la moyenne de npxG.xAG la plus élevée (4.72), ce qui est cohérent puisqu’ils sont les principaux responsables de la création et de la finition des actions offensives. Ils affichent également la valeur maximale la plus importante (32.4), traduisant la présence de profils offensifs d’élite.
+
+Les milieux (Midfielder) occupent une position intermédiaire avec une moyenne de 2.45, reflétant leur rôle partagé entre création du jeu et participation offensive. Les défenseurs (Defender) enregistrent logiquement les valeurs les plus faibles (1.49 en moyenne), leur rôle principal étant davantage orienté vers les tâches défensives. Ces résultats confirment que la contribution offensive varie fortement selon le rôle tactique des joueurs sur le terrain.
+
+### **3) Boxplot**
+
+Très bon pour comparer les distributions.
+
+```{r}
+ggplot(
+  players_clean,
+  aes(
+    x = reorder(Pos_simple, npxG.xAG, median),
+    y = npxG.xAG,
+    fill = Pos_simple
+  )
+) +
+  geom_boxplot(
+    alpha = 0.8,
+    outlier.color = "red"
+  ) +
+  labs(
+    title = "Distribution de npxG.xAG selon le poste",
+    subtitle = "Comparaison des contributions offensives",
+    x = "Poste",
+    y = "npxG.xAG"
+  ) +
+  theme_minimal()
+```
+
+Ce boxplot confirme les résultats observés dans le tableau descriptif. Les attaquants présentent une médiane de npxG.xAG nettement plus élevée ainsi qu’une dispersion plus importante, ce qui traduit leur rôle central dans la production offensive. Ils concentrent également les valeurs extrêmes les plus élevées, correspondant aux joueurs offensifs d’élite.
+
+Les milieux affichent des niveaux intermédiaires de contribution offensive, tandis que les défenseurs présentent logiquement les valeurs les plus faibles. D’un point de vue footballistique, ce graphique illustre clairement la répartition des responsabilités offensives selon les postes.
+
+### **6) Densité plot par poste**
+
+```{r}
+ggplot(
+  players_clean,
+  aes(
+    x = Pos_simple,
+    y = npxG.xAG,
+    fill = Pos_simple
+  )
+) +
+  stat_summary(
+    fun = mean,
+    geom = "bar",
+    alpha = 0.8
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Moyenne de npxG.xAG par poste",
+    x = "Poste",
+    y = "Contribution offensive moyenne"
+  )
+```
+Ce graphique montre que les attaquants présentent la contribution offensive moyenne la plus élevée, ce qui confirme leur rôle principal dans la création et la finition des actions offensives. Les milieux affichent des valeurs intermédiaires, tandis que les défenseurs possèdent logiquement la contribution offensive moyenne la plus faible.
+
+D’un point de vue footballistique, ces résultats confirment que plus un joueur évolue dans un rôle offensif, plus sa contribution attendue aux buts et aux passes décisives est importante.
+
+### **7) Top joueurs offensifs**
+
+```{r}
+players_clean %>%
+  arrange(desc(npxG.xAG)) %>%
+  select(Player, Pos_simple, npxG.xAG) %>%
+  head(10) %>%
+  kable(
+    caption = "Top 10 des joueurs selon npxG.xAG"
+  )
+```
+
+Ce tableau met en évidence les joueurs ayant la plus forte contribution offensive attendue (npxG.xAG) dans l’échantillon. On observe que les dix premières places sont exclusivement occupées par des attaquants, ce qui confirme les résultats précédents montrant que ce poste concentre l’essentiel de la production offensive.
+
+# ACP
+
+Après avoir étudié les variables de manière univariée et bivariée, nous souhaitons désormais comprendre comment elles interagissent entre elles pour définir des profils de joueurs. Cependant, manipuler simultanément une dizaine d'indicateurs (buts, tirs, passes progressives, etc.) rend l'interprétation complexe.
+L'Analyse en Composantes Principales (ACP) est une méthode de statistique multivariée qui répond à cette problématique. Son objectif est de synthétiser l'information contenue dans un grand nombre de variables corrélées pour la projeter sur un nombre réduit de nouveaux axes, appelés Composantes Principales.
+```{r}
+players_pca <- players_clean %>%
+  select(Player, Pos,
+         xG, xAG, PrgC, PrgP, PrgR,
+         Sh, SoT, Gls, Ast, `npxG.xAG`) %>% #choix des variables numériques (xG, Ast, PrgP, etc.) qui décrivent la performance
+  drop_na() #Suppression de toutes les lignes contenant au moins une valeur manquante.
+```
+```{r}
+players_pca %>%
+  select(-Player,-Pos) %>%
+  summary()
+```
+```{r}
+players_pca %>%
+  select(-Player,-Pos) %>%
+  correlate() %>%
+  rplot()
+```
+Nous observons une forte multicolinéarité au sein du bloc offensif (cercles bleu foncé entre xG, Sh, SoT et Gls), signalant une redondance d'information : ces variables décrivent toutes la capacité de finition.
+
+À l'inverse, des variables comme les passes progressives (PrgP) présentent des corrélations beaucoup plus faibles avec le reste des indicateurs. Cette hétérogénéité dans les liaisons suggère que nos données cachent plusieurs dimensions distinctes du jeu (finition vs construction), que l'ACP permettra de séparer clairement sur un plan factoriel.
+
+Cela justifie parfaitement une ACP, plusieurs variables sont redondantes/corrélées donc on résume l'information
+
+```{r}
+pca_football <- prcomp(
+  players_pca %>% select(-Player,-Pos),
+  center = TRUE,
+  scale. = TRUE #centré et réduire car les variables n'ont pas les mêmes unités
+)
+tidy(pca_football, matrix="pcs") %>%
+  kable(
+    caption="Variance expliquée par chaque composante principale"
+  )
+```
+Au vu de la concentration de l'information sur le premier axe (73 %), le plan factoriel (PC1, PC2) est amplement suffisant pour résumer la structure des performances offensives de notre échantillon
+```{r}
+fviz_eig(pca_football, 
+         addlabels = TRUE,       # Affiche le % au-dessus de chaque barre
+         ylim = c(0, 80),        # Ajuste l'axe Y selon tes données (ici 70%+)
+         barfill = "steelblue", 
+         barcolor = "steelblue",
+         linecolor = "red",
+         main = "Éboulis des valeurs propres (Scree Plot)",
+         xlab = "Composantes Principales (Axes)",
+         ylab = "Pourcentage de variance expliquée")
+```
+L'examen du scree plot permet de valider la réduction dimensionnelle. La première composante principale (PC1) explique à elle seule 73% de la variance totale, ce qui est considérable.
+
+On observe un coude très marqué après la première composante. La ligne de variance cumulée (en rouge) indique qu'en ne gardant que les deux premiers axes, nous restituons 86% de l'information initiale. Par conséquent, la représentation des joueurs sur le plan (PC1, PC2) est une approximation très fidèle de la réalité des données."
+
+
+```{r}
+fviz_pca_var(pca_football, col.var = "contrib", 
+             gradient.cols = c("cyan", "yellow", "red"), 
+             repel = TRUE)
+```
+Cela confirme bien ce que l'on a vu dans la matrice des corrélations.
+L'examen du cercle des corrélations montre que toutes les variables de performance offensive sont fortement corrélées positivement avec le premier axe PC1 (abscisse). Cet axe peut donc être interprété comme un indicateur de volume offensif global.
+Le deuxième axe PC2 (ordonné) permet quant à lui de nuancer les profils : il oppose les variables liées à la création d'occasions et à la progression du ballon (xAG, PrgP), situées en bas du cercle, aux variables liées à la finition pure (Gls, SoT), situées en haut.
+La proximité entre npxG.xAG et les variables de buts/passes confirme que cet indicateur synthétique est un excellent résumé de la contribution offensive d'un joueur.
+```{r}
+scores <- augment(
+  pca_football,
+  data = players_pca
+) #permet d'afficher le nom du joueur et son poste sur le graphique
+
+
+
+# On crée une nouvelle colonne 'Pos_simple'
+scores <- scores %>%
+  mutate(Pos_simple = case_when(
+    grepl("FW", Pos) ~ "Attaquant",
+    grepl("MF", Pos) ~ "Milieu",
+    grepl("DF", Pos) ~ "Défenseur",
+    grepl("GK", Pos) ~ "Gardien",
+    TRUE ~ "Autre" #Filtre permettant de rendre le nuage plus lisible
+  ))
+
+# Vérification rapide
+table(scores$Pos_simple)
+
+ggplot(scores,
+       aes(x = .fittedPC1, y = .fittedPC2 
+           , color = Pos_simple)) +
+  geom_point(alpha = 0.7) + #alpha gère la transparence des points
+  geom_text(
+    aes(label=Player),
+    check_overlap = TRUE, # n'affiche pas le nom du joueur s'il en cache un autre
+    size=3
+  )+
+  labs(
+    x = "Apport offensif global (Volume - PC1 : 73%)",
+    y = "Spécialisation : Finition (+) vs Création (-) (PC2 : 13%)",
+    title = "Cartographie des profils offensifs des joueurs",
+    color = "Poste"
+  ) +
+  theme_minimal()
+```
+La projection des joueurs confirme la séparation par postes. On observe une transition fluide de la gauche vers la droite : les défenseurs (faible PC1) laissent place aux milieux, puis aux attaquants qui saturent la partie droite du graphique. Cependant, l'intérêt de l'ACP est de repérer les joueurs qui sortent du lot au sein de leur propre catégorie.
+L'analyse des individus met en évidence le profil de Mohamed Salah. Sa position à l'extrême droite de l'axe PC1 témoigne de son volume de jeu exceptionnel. Sa position centrale sur l'axe PC2 illustre son profil d'attaquant polyvalent : il ne se limite pas à la finition (comme Haaland) ou à la création (comme Pedri), mais combine les deux dimensions de manière équilibrée.
+
+### Conclusion
+
+Enfin, notre étude souligne l'importance de la variable synthétique npxG.xAG. Sa position centrale et sa forte contribution à l'axe PC1 démontrent qu'elle constitue l'indicateur de performance le plus complet. Là où les buts ou les passes décisives peuvent être soumis à une part d'aléatoire, le npxG.xAG capture la dangerosité intrinsèque du joueur. En conclusion, cette variable n'est pas seulement une statistique parmi d'autres, mais le véritable moteur de la hiérarchie offensive observée dans notre échantillon.
+
+
+# Une analyse de classification non supervisée
+
+Dans cette partie, nous cherchons à identifier automatiquement des profils de joueurs similaires à partir de leurs statistiques offensives, sans utiliser le poste comme variable explicative. L’objectif est de regrouper les joueurs selon leurs performances réelles afin de faire émerger des profils naturels à partir des données.
+
+Cette approche est particulièrement intéressante dans le football moderne, car deux joueurs occupant officiellement le même poste peuvent avoir des styles de jeu très différents. À l’inverse, des joueurs évoluant à des postes différents peuvent présenter des profils statistiques similaires. L’analyse non supervisée permet donc d’aller au-delà des classifications traditionnelles basées uniquement sur le poste.
+
+### **1) Sélection des variables pour le clustering**
+
+On enlève les variables qualitatives (Squad, Comp, Nation) variables redondantes ou peu utiles (PKatt, CrdY, CrdR) variables trop corrélées inutilement (G.A somme des Gls et Ast)
+On garde les plus pertinentes.
+
+```{r}
+cluster_data <- players_clean %>%
+  select(
+    Player,
+    Pos,
+    Gls,
+    Ast,
+    xG,
+    xAG,
+    npxG.xAG,
+    PrgC,
+    PrgP,
+    PrgR,
+    Sh,
+    SoT
+  ) %>%
+  drop_na() #supprime les valeurs manquantes
+```
+
+Ces variables permettent d’obtenir une vision complète du profil offensif d’un joueur : sa capacité à marquer, créer, progresser balle au pied et participer globalement aux actions offensives. Ce choix reste cohérent avec les analyses précédentes, notamment l’ACP qui mettait déjà en évidence l’importance de ces indicateurs.
+### **2) Standardisation des variables**
+
+
+
+```{r}
+cluster_scaled <- cluster_data %>%
+  select(-Player,-Pos) %>%
+  # On supprime les variables qualitatives
+  scale()
+#On centre et réduit les variables quantitatives
+```
+
+Cette étape est nécessaire car les variables ne sont pas exprimées sur la même échelle. Par exemple, le nombre de tirs (Sh) peut être beaucoup plus élevé que le nombre de buts (Gls).
+
+
+### **3. Classification hiérarchique ascendante
+
+Avant d’appliquer K-means, nous réalisons une classification hiérarchique afin d’observer la structure naturelle des données et vérifier s’il existe des groupes distincts de joueurs.
+
+
+**Matrice de distance**
+```{r}
+dist_matrix <- dist(
+  cluster_scaled,
+  method = "euclidean"
+)
+#Cette étape calcule la distance entre chaque paire de joueurs en utilisant la methode euclediene
+```
+Cette étape permet de mesurer la proximité statistique entre les joueurs, plus deux joueurs sont proches, plus leurs profils offensifs sont similaires.
+
+**Classification hiérarchique**
+
+```{r}
+hc <- hclust(
+  dist_matrix,
+  method = "ward.D2" #regrouper en minimisant la variance intra classe
+)
+```
+Cette méthode permet généralement d’obtenir des groupes plus homogènes et facilite l’interprétation des profils de joueurs avant l’application du K-means.
+
+**Dendogramme**
+
+
+```{r}
+plot(
+  hc,
+  labels = FALSE,
+  hang = -1,
+  main = "Dendrogramme de classification hiérarchique des joueurs",
+  xlab = "Joueurs",
+  ylab = "Distance"
+)
+```
+
+Le dendrogramme met en évidence une structure hiérarchique entre les joueurs et suggère l’existence de plusieurs groupes distincts. Une coupure de l’arbre à un niveau pertinent semble faire apparaître environ trois grands groupes de joueurs, ce qui est cohérent avec le choix de K=3 retenu par la suite dans l’algorithme K-means.
+
+Cette étape permet ainsi d’obtenir une première validation visuelle de la présence de profils offensifs différenciés au sein de l’échantillon
+
+### **4. Choix du nombre optimal de clusters**
+
+méthode du coude
+
+```{r}
+fviz_nbclust(
+  cluster_scaled,
+  kmeans,
+  method = "wss"
+) +
+  theme_minimal()
+```
+
+Ce graphique représente l’évolution de la variance intra-classe (WSS) en fonction du nombre de clusters. On observe une forte diminution entre K=1 et K=3, puis la courbe devient progressivement plus stable à partir de K=3.
+
+Selon la méthode du coude, le choix de 3 clusters est le plus pertinent, puisqu’ajouter davantage de groupes améliore relativement peu la qualité de la classification. Ce résultat est cohérent avec l’analyse hiérarchique précédente qui suggérait également l’existence de plusieurs profils distincts de joueurs.
+
+
+### **4) K-means final**
+
+```{r}
+set.seed(123)
+
+km_final <- kmeans(
+  cluster_scaled, # On utilise les données standardisées
+  centers = 3, # ON applique K-means avec les 3 clusters retenus précédemment
+  nstart = 25 # on lance l’algorithme 25 fois
+)
+```
+
+
+### **5) Ajouter les clusters au dataset**
+
+```{r}
+cluster_data$cluster <- as.factor(km_final$cluster)
+#ON ajoute à chaque joueur le numéro du cluster au quel il appartient
+```
+ 
+Ca permet d’associer chaque joueur à son groupe afin de faciliter l’interprétation des résultats et les visualisations suivantes.
+
+
+
+
+### **6) Visualisation principale des clusters**
+
+
+
+```{r}
+fviz_cluster(
+  km_final,
+  data = cluster_scaled,
+  geom = "point",
+  ellipse.type = "convex",
+  palette = "jco",
+  ggtheme = theme_minimal()
+)
+```
+
+Ce graphique représente les joueurs selon les deux premières dimensions principales utilisées pour visualiser les clusters. Chaque point correspond à un joueur et chaque couleur représente le groupe attribué par l’algorithme K-means.
+
+On observe une séparation relativement claire entre les trois clusters. Le cluster 1 (bleu) regroupe les joueurs ayant les profils offensifs les plus élevés, avec des statistiques plus importantes en buts, création et progression offensive. Le cluster 2 (jaune) correspond à des joueurs au profil offensif intermédiaire, tandis que le cluster 3 (gris) rassemble les joueurs ayant une contribution offensive plus faible.
+
+D’un point de vue footballistique, cette classification met en évidence différents profils naturels : joueurs offensifs très productifs, profils intermédiaires polyvalents et joueurs moins impliqués dans les actions offensives.
+
+### **7) Profil moyen de chaque cluster**
+
+
+
+```{r}
+cluster_data %>%
+  group_by(cluster) %>%
+  summarise(
+    Gls = mean(Gls),
+    Ast = mean(Ast),
+    xG = mean(xG),
+    xAG = mean(xAG),
+    Sh = mean(Sh),
+    SoT = mean(SoT),
+    npxG.xAG = mean(npxG.xAG)
+  ) %>%
+  kable(caption ="Profil moyen de chaque cluster" )
+```
+
+-Le cluster 1 regroupe les joueurs les plus performants offensivement. Ils affichent les moyennes les plus élevées en buts, passes décisives, xG, xAG, tirs et tirs cadrés. Ce groupe correspond aux joueurs offensifs les plus influents, souvent des attaquants ou des profils très créatifs.
+-Le cluster 2 représente des joueurs au profil intermédiaire. Leurs statistiques offensives restent correctes mais nettement inférieures à celles du cluster 1. Il peut s’agir de milieux offensifs, d’ailiers ou de joueurs participant régulièrement au jeu offensif sans être les principaux finisseurs.
+-Le cluster 3 rassemble les joueurs ayant la contribution offensive la plus faible. Ils enregistrent les valeurs les plus basses sur l’ensemble des indicateurs offensifs, ce qui correspond généralement à des défenseurs ou à des joueurs ayant un rôle plus défensif dans leur équipe.
+
+Cette classification montre donc que l’algorithme distingue principalement trois profils : joueurs offensifs d’élite, profils intermédiaires et joueurs peu impliqués offensivement.
+
+
+### **8) Barplot simple**
+
+```{r}
+cluster_data %>%
+  group_by(cluster) %>%
+  summarise(
+    mean_contribution = mean(npxG.xAG)
+  ) %>%
+  ggplot(
+    aes(
+      x = cluster,
+      y = mean_contribution,
+      fill = cluster
+    )
+  ) +
+  geom_col() +
+  theme_minimal() +
+  labs(
+    title = "Contribution offensive moyenne par cluster",
+    y = "npxG.xAG moyen"
+  )
+```
+Ce graphique met clairement en évidence les différences de contribution offensive moyenne entre les trois clusters. Le cluster 1 présente de loin la contribution offensive moyenne la plus élevée, ce qui confirme qu’il regroupe les joueurs offensifs les plus performants.
+
+Le cluster 2 correspond à des joueurs au profil intermédiaire, tandis que le cluster 3 rassemble les joueurs les moins impliqués offensivement. D’un point de vue footballistique, ce résultat confirme que l’algorithme a réussi à segmenter les joueurs selon différents niveaux de performance offensive
+
+
+### Conclusion
+L’analyse non supervisée a permis d’identifier trois profils naturels de joueurs à partir de leurs statistiques offensives. Les résultats distinguent des joueurs très performants offensivement, des profils intermédiaires et des joueurs faiblement impliqués dans les actions offensives. Cette classification confirme que les données permettent de révéler des profils de jeu sans utiliser directement la variable poste.
+
+# **Conclusion générale**
+
+Ce projet a permis d’analyser la performance offensive des joueurs évoluant dans les cinq grands championnats européens à travers plusieurs méthodes statistiques complémentaires.
+
+L’analyse univariée a montré que la contribution offensive est fortement concentrée sur un nombre limité de joueurs. L’analyse bivariée a mis en évidence l’impact du poste sur la contribution offensive ainsi que la forte relation entre les occasions générées et les buts réellement marqués. L’ACP a permis de résumer les principales dimensions de la performance offensive, tandis que l’analyse non supervisée a identifié différents profils de joueurs selon leurs caractéristiques statistiques.
+
+Globalement, cette étude montre que les outils statistiques permettent de mieux comprendre les profils offensifs dans le football moderne et d’identifier objectivement les joueurs les plus performants.
